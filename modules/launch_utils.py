@@ -360,6 +360,26 @@ def requirements_met(requirements_file):
     return True
 
 
+def ensure_setuptools():
+    """Ensure the venv has a setuptools version that still ships pkg_resources.
+
+    setuptools >= 82 removed pkg_resources, which breaks legacy packages
+    (e.g. CLIP) that import it in their setup.py.  Pin to the version
+    declared in requirements_versions.txt so that --no-build-isolation
+    installs work correctly.
+    """
+    target = "69.5.1"  # must match requirements_versions.txt
+    try:
+        current = importlib.metadata.version("setuptools")
+        from packaging.version import parse
+        if parse(current) >= parse("82"):
+            run(f'"{python}" -m pip install setuptools=={target}',
+                desc=f"Pinning setuptools to {target} (pkg_resources fix)",
+                errdesc="Couldn't pin setuptools")
+    except Exception:
+        pass
+
+
 def prepare_environment():
     torch_index_url = os.environ.get('TORCH_INDEX_URL', "https://download.pytorch.org/whl/cu121")
     torch_command = os.environ.get('TORCH_COMMAND', f"pip install torch==2.3.1 torchvision==0.18.1 --extra-index-url {torch_index_url}")
@@ -439,12 +459,19 @@ def prepare_environment():
         )
     startup_timer.record("torch GPU test")
 
+    # Ensure setuptools has pkg_resources before building packages from source
+    ensure_setuptools()
+    startup_timer.record("ensure setuptools")
+
     if not is_installed("clip"):
-        run_pip(f"install {clip_package}", "clip")
+        # Use --no-build-isolation so the build uses the venv's pinned
+        # setuptools (which still has pkg_resources) instead of pip pulling
+        # the latest setuptools (v82+) which removed it.
+        run_pip(f"install --no-build-isolation {clip_package}", "clip")
         startup_timer.record("install clip")
 
     if not is_installed("open_clip"):
-        run_pip(f"install {openclip_package}", "open_clip")
+        run_pip(f"install --no-build-isolation {openclip_package}", "open_clip")
         startup_timer.record("install open_clip")
 
     if (not is_installed("xformers") or args.reinstall_xformers) and args.xformers:

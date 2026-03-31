@@ -369,17 +369,34 @@ def ensure_setuptools():
     installs work correctly.
     """
     target = "69.5.1"  # must match requirements_versions.txt
+
+    # Try to determine the currently installed setuptools version.
     try:
         current = importlib.metadata.version("setuptools")
-        from packaging.version import parse
-        if parse(current) >= parse("82"):
-            run(f'"{python}" -m pip install setuptools=={target}',
-                desc=f"Pinning setuptools to {target} (pkg_resources fix)",
-                errdesc="Couldn't pin setuptools")
-    except Exception:
-        pass
+    except importlib.metadata.PackageNotFoundError:
+        # setuptools is not installed; install the pinned version so that
+        # legacy packages depending on pkg_resources can build correctly.
+        run(
+            f'"{python}" -m pip install setuptools=={target}',
+            desc=f"Installing setuptools=={target} (pkg_resources fix)",
+            errdesc="Couldn't install setuptools",
+        )
+        return
+    except Exception as e:
+        # Unexpected error while checking setuptools; log and return without
+        # silently hiding the problem.
+        logging.warning("Failed to determine setuptools version: %s", e)
+        return
 
+    from packaging.version import parse
 
+    # If setuptools is too new (pkg_resources removed), pin it to the target.
+    if parse(current) >= parse("82"):
+        run(
+            f'"{python}" -m pip install setuptools=={target}',
+            desc=f"Pinning setuptools to {target} (pkg_resources fix)",
+            errdesc="Couldn't pin setuptools",
+        )
 def prepare_environment():
     torch_index_url = os.environ.get('TORCH_INDEX_URL', "https://download.pytorch.org/whl/cu121")
     torch_command = os.environ.get('TORCH_COMMAND', f"pip install torch==2.3.1 torchvision==0.18.1 --extra-index-url {torch_index_url}")
